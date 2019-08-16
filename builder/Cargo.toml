@@ -12,6 +12,11 @@ proc-macro = true
 name = "tests"
 path = "tests/progress.rs"
 
+# For debugging macro by using cargo expand --bin <NAME>
+#[[bin]]
+#name = "parse"
+#path = "tests/01-parse.rs"
+
 [dev-dependencies]
 trybuild = "1.0"
 
