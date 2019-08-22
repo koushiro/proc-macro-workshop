@@ -17,60 +17,109 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 fn builder_for_struct(ast: syn::DeriveInput) -> proc_macro2::TokenStream {
+    let vis = ast.vis;
     let name = ast.ident;
-    let builder_name = format_ident!("{}Builder", name);
-
     let fields = match ast.data {
         syn::Data::Struct(data) => data.fields,
         _ => unreachable!(),
     };
 
-    let field_idents = fields
+    let builder_name = format_ident!("{}Builder", name);
+
+    let empty_fields = fields
         .iter()
         .map(|field| {
-            let field_ident = field.ident.as_ref().unwrap();
-            quote!(#field_ident)
-        })
-        .collect::<Vec<_>>();
+            let ident = &field.ident;
+            quote!{ #ident: None }
+        });
 
-    let field_types = fields
+    let construct_fields = fields
         .iter()
         .map(|field| {
-            let field_type = &field.ty;
-            quote!(#field_type)
-        })
-        .collect::<Vec<_>>();
+            let ident = &field.ident;
+            let ty = &field.ty;
+            if is_optional_type(ty) {
+                quote!{ #ident: #ty }
+            } else {
+                quote!{ #ident: Option<#ty> }
+            }
+        });
 
-    let error_trait: syn::Path = syn::parse_str("::std::error::Error").unwrap();
+    let set_fields = fields
+        .iter()
+        .map(|field| {
+            let ident = &field.ident;
+            let ty = &field.ty;
+            if is_optional_type(ty) {
+                quote! { #ident: self.#ident.clone() }
+            } else {
+                quote! { #ident: self.#ident.clone().ok_or(concat!("Field [", stringify!(#ident), "] is missing"))? }
+            }
+        });
+
+    let setters = fields.iter().map(|field| {
+        let vis = &field.vis;
+        let ident = &field.ident;
+        let ty = &field.ty;
+        if let Some(inner_ty) = inner_type("Option", ty) {
+            quote! {
+                #vis fn #ident(&mut self, #ident: #inner_ty) -> &mut Self {
+                    self.#ident = Some(#ident);
+                    self
+                }
+            }
+        } else {
+            quote! {
+                #vis fn #ident(&mut self, #ident: #ty) -> &mut Self {
+                    self.#ident = Some(#ident);
+                    self
+                }
+            }
+        }
+    });
 
     quote! {
         impl #name {
-            pub fn builder() -> #builder_name {
+            #vis fn builder() -> #builder_name {
                 #builder_name {
-                    #(#field_idents: None,)*
+                    #(#empty_fields,)*
                 }
             }
         }
 
-        pub struct #builder_name {
-            #(#field_idents: Option<#field_types>,)*
+        #vis struct #builder_name {
+            #(#construct_fields,)*
         }
 
         impl #builder_name {
-            #(
-                fn #field_idents (&mut self, #field_idents: #field_types) -> &mut Self {
-                    self.#field_idents = Some(#field_idents);
-                    self
-                }
-            )*
+            #(#setters)*
 
-            fn build(&mut self) -> Result<#name, Box<dyn #error_trait>> {
+            #vis fn build(&mut self) -> Result<#name, Box<dyn ::std::error::Error>> {
                 Ok(#name {
-                    #(
-                        #field_idents: self.#field_idents.clone().unwrap(),
-                    )*
+                    #(#set_fields,)*
                 })
             }
         }
     }
+}
+
+fn inner_type<'a>(string: &str, ty: &'a syn::Type) -> Option<&'a syn::Type> {
+    if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
+        if path.segments.len() != 1 || path.segments[0].ident != string {
+            return None;
+        }
+        if let syn::PathArguments::AngleBracketed(ref inner) = path.segments[0].arguments {
+            if inner.args.len() != 1 {
+                return None;
+            }
+            if let syn::GenericArgument::Type(ref ty) = inner.args.first().unwrap() {
+                return Some(ty);
+            }
+        }
+    }
+    None
+}
+
+fn is_optional_type(ty: &syn::Type) -> bool {
+    inner_type("Option", ty).is_some()
 }
