@@ -25,38 +25,52 @@ fn builder_for_struct(ast: syn::DeriveInput) -> proc_macro2::TokenStream {
         _ => unreachable!(),
     };
 
-    let field_idents = fields.iter().map(|field| {
-        let field_ident = field.ident.as_ref().unwrap();
-        quote!(#field_ident)
-    }).collect::<Vec<_>>();
+    let field_idents = fields
+        .iter()
+        .map(|field| {
+            let field_ident = field.ident.as_ref().unwrap();
+            quote!(#field_ident)
+        })
+        .collect::<Vec<_>>();
 
-    let field_types = fields.iter().map(|field| {
-        let field_type = &field.ty;
-        quote!(#field_type)
-    }).collect::<Vec<_>>();
+    let field_types = fields
+        .iter()
+        .map(|field| {
+            let field_type = &field.ty;
+            quote!(#field_type)
+        })
+        .collect::<Vec<_>>();
 
-    let option: syn::Path = syn::parse_str("::std::option::Option").unwrap();
+    let error_trait: syn::Path = syn::parse_str("::std::error::Error").unwrap();
 
     quote! {
         impl #name {
             pub fn builder() -> #builder_name {
                 #builder_name {
-                    #(#field_idents: #option::None,)*
+                    #(#field_idents: None,)*
                 }
             }
         }
 
         pub struct #builder_name {
-            #(#field_idents: #option<#field_types>,)*
+            #(#field_idents: Option<#field_types>,)*
         }
 
         impl #builder_name {
             #(
                 fn #field_idents (&mut self, #field_idents: #field_types) -> &mut Self {
-                    self.#field_idents = #option::Some(#field_idents);
+                    self.#field_idents = Some(#field_idents);
                     self
                 }
             )*
+
+            fn build(&mut self) -> Result<#name, Box<dyn #error_trait>> {
+                Ok(#name {
+                    #(
+                        #field_idents: self.#field_idents.clone().unwrap(),
+                    )*
+                })
+            }
         }
     }
 }
