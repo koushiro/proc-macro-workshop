@@ -13,9 +13,9 @@ name = "tests"
 path = "tests/progress.rs"
 
 # For debugging macro by using cargo expand --bin <NAME>
-#[[bin]]
-#name = "create-builder"
-#path = "tests/02-create-builder.rs"
+[[bin]]
+name = "call-setter"
+path = "tests/03-call-setters.rs"
 
 [dev-dependencies]
 trybuild = "1.0"

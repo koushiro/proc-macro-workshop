@@ -30,7 +30,11 @@ fn builder_for_struct(ast: syn::DeriveInput) -> proc_macro2::TokenStream {
         quote!(#field_ident)
     }).collect::<Vec<_>>();
 
-    let string: syn::Path = syn::parse_str("::std::string::String").unwrap();
+    let field_types = fields.iter().map(|field| {
+        let field_type = &field.ty;
+        quote!(#field_type)
+    }).collect::<Vec<_>>();
+
     let option: syn::Path = syn::parse_str("::std::option::Option").unwrap();
 
     quote! {
@@ -43,7 +47,16 @@ fn builder_for_struct(ast: syn::DeriveInput) -> proc_macro2::TokenStream {
         }
 
         pub struct #builder_name {
-            #(#field_idents: #option<#string>,)*
+            #(#field_idents: #option<#field_types>,)*
+        }
+
+        impl #builder_name {
+            #(
+                fn #field_idents (&mut self, #field_idents: #field_types) -> &mut Self {
+                    self.#field_idents = #option::Some(#field_idents);
+                    self
+                }
+            )*
         }
     }
 }
