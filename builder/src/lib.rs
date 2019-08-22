@@ -1,39 +1,49 @@
 extern crate proc_macro;
+#[macro_use]
+extern crate quote;
 
-use proc_macro2::Span;
-use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Ident};
+use syn::parse_macro_input;
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // Parse the input tokens into a syntax tree.
-    let input = parse_macro_input!(input as DeriveInput);
+    let input = parse_macro_input!(input as syn::DeriveInput);
 
-    // Used in the quasi-quotation below as `#name`.
-    let name = input.ident;
+    // Construct builder pattern for structure.
+    let output = builder_for_struct(input);
 
-    let builder_name = Ident::new(&format!("{}Builder", name), Span::call_site());
+    // Hand the output tokens back to the compiler.
+    proc_macro::TokenStream::from(output)
+}
 
-    let output = quote! {
+fn builder_for_struct(ast: syn::DeriveInput) -> proc_macro2::TokenStream {
+    let name = ast.ident;
+    let builder_name = format_ident!("{}Builder", name);
+
+    let fields = match ast.data {
+        syn::Data::Struct(data) => data.fields,
+        _ => unreachable!(),
+    };
+
+    let field_idents = fields.iter().map(|field| {
+        let field_ident = field.ident.as_ref().unwrap();
+        quote!(#field_ident)
+    }).collect::<Vec<_>>();
+
+    let string: syn::Path = syn::parse_str("::std::string::String").unwrap();
+    let option: syn::Path = syn::parse_str("::std::option::Option").unwrap();
+
+    quote! {
         impl #name {
             pub fn builder() -> #builder_name {
                 #builder_name {
-                    executable: None,
-                    args: None,
-                    env: None,
-                    current_dir: None,
+                    #(#field_idents: #option::None,)*
                 }
             }
         }
 
         pub struct #builder_name {
-            executable: Option<String>,
-            args: Option<Vec<String>>,
-            env: Option<Vec<String>>,
-            current_dir: Option<String>,
+            #(#field_idents: #option<#string>,)*
         }
-    };
-
-    // Hand the output tokens back to the compiler.
-    proc_macro::TokenStream::from(output)
+    }
 }
