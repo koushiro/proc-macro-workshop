@@ -2,21 +2,23 @@ extern crate proc_macro;
 #[macro_use]
 extern crate quote;
 
+use syn::parse::{Error, Parse, ParseStream, Result};
+
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // Parse the input tokens into a syntax tree.
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
 
     // Construct builder pattern for structure.
-    let output = builder_for_struct(input);
+    let output = impl_builder_for_struct(input);
 
     // Hand the output tokens back to the compiler.
     proc_macro::TokenStream::from(output)
 }
 
-fn builder_for_struct(ast: syn::DeriveInput) -> proc_macro2::TokenStream {
-    let ident = ast.ident;
-    let builder = format_ident!("{}Builder", ident);
+fn impl_builder_for_struct(ast: syn::DeriveInput) -> proc_macro2::TokenStream {
+    let name = ast.ident;
+    let builder_name = format_ident!("{}Builder", name);
 
     let fields = match ast.data {
         syn::Data::Struct(data) => data.fields,
@@ -28,51 +30,50 @@ fn builder_for_struct(ast: syn::DeriveInput) -> proc_macro2::TokenStream {
         _ => panic!("#[derive(Builder)] is not defined for Unnamed structs and Uint structs"),
     }
 
-    let builder_default_fields = builder_default_fields(&fields);
-    let builder_fields = builder_fields(&fields);
-    let builder_setters = builder_setters(&fields);
-    let build_set_fields = build_set_fields(&fields);
+    let impl_builder_fn_for_struct = impl_builder_fn_for_struct(&name, &builder_name, &fields);
+    let struct_builder = struct_builder(&builder_name, &fields);
+    let impl_build_fn_for_struct_builder =
+        impl_build_fn_for_struct_builder(&name, &builder_name, &fields);
+    let impl_setters_for_struct_builder = impl_setters_for_struct_builder(&builder_name, &fields)
+        .unwrap_or_else(|err| err.to_compile_error());
 
     quote! {
-        impl #ident {
-            pub fn builder() -> #builder {
-                #builder {
-                    #( #builder_default_fields )*
-                }
-            }
-        }
+        #impl_builder_fn_for_struct
 
-        pub struct #builder {
-            #( #builder_fields )*
-        }
+        #struct_builder
 
-        impl #builder {
-            #( #builder_setters )*
+        #impl_build_fn_for_struct_builder
 
-            pub fn build(&mut self) -> Result<#ident, Box<dyn std::error::Error>> {
-                Ok(#ident {
-                    #( #build_set_fields )*
-                })
-            }
-        }
+        #impl_setters_for_struct_builder
     }
 }
 
-fn builder_default_fields(
+fn impl_builder_fn_for_struct(
+    name: &syn::Ident,
+    builder_name: &syn::Ident,
     fields: &syn::Fields,
-) -> impl Iterator<Item = proc_macro2::TokenStream> + '_ {
-    fields.iter().map(|field| {
+) -> proc_macro2::TokenStream {
+    let builder_default_fields = fields.iter().map(|field| {
         let ident = &field.ident;
         if field_is_vec(field) {
             quote! { #ident: vec![], }
         } else {
             quote! { #ident: None, }
         }
-    })
+    });
+    quote! {
+        impl #name {
+            pub fn builder() -> #builder_name {
+                #builder_name {
+                    #( #builder_default_fields )*
+                }
+            }
+        }
+    }
 }
 
-fn builder_fields(fields: &syn::Fields) -> impl Iterator<Item = proc_macro2::TokenStream> + '_ {
-    fields.iter().map(|field| {
+fn struct_builder(builder_name: &syn::Ident, fields: &syn::Fields) -> proc_macro2::TokenStream {
+    let builder_fields = fields.iter().map(|field| {
         let ident = &field.ident;
         let ty = &field.ty;
         if field_is_option(field) || field_is_vec(field) {
@@ -80,11 +81,19 @@ fn builder_fields(fields: &syn::Fields) -> impl Iterator<Item = proc_macro2::Tok
         } else {
             quote! { #ident: Option<#ty>, }
         }
-    })
+    });
+    quote! {
+        pub struct #builder_name {
+            #( #builder_fields )*
+        }
+    }
 }
 
-fn builder_setters(fields: &syn::Fields) -> impl Iterator<Item = proc_macro2::TokenStream> + '_ {
-    fields.iter().map(|field| {
+fn impl_setters_for_struct_builder(
+    builder_name: &syn::Ident,
+    fields: &syn::Fields,
+) -> Result<proc_macro2::TokenStream> {
+    let builder_setters = fields.iter().map(|field| {
         let ident = &field.ident;
         let ty = &field.ty;
         if let Some(vec_inner_ty) = generic_inner_type(field, "Vec") {
@@ -119,11 +128,20 @@ fn builder_setters(fields: &syn::Fields) -> impl Iterator<Item = proc_macro2::To
                 }
             }
         }
+    });
+    Ok(quote! {
+        impl #builder_name {
+            #( #builder_setters )*
+        }
     })
 }
 
-fn build_set_fields(fields: &syn::Fields) -> impl Iterator<Item = proc_macro2::TokenStream> + '_ {
-    fields
+fn impl_build_fn_for_struct_builder(
+    name: &syn::Ident,
+    builder_name: &syn::Ident,
+    fields: &syn::Fields,
+) -> proc_macro2::TokenStream {
+    let build_set_fields = fields
         .iter()
         .map(|field| {
             let ident = &field.ident;
@@ -134,7 +152,16 @@ fn build_set_fields(fields: &syn::Fields) -> impl Iterator<Item = proc_macro2::T
             } else {
                 quote! { #ident: self.#ident.take().ok_or(concat!("Field [", stringify!(#ident), "] is missing"))?, }
             }
-        })
+        });
+    quote! {
+        impl #builder_name {
+            pub fn build(&mut self) -> Result<#name, Box<dyn std::error::Error>> {
+                Ok(#name {
+                    #( #build_set_fields )*
+                })
+            }
+        }
+    }
 }
 
 fn field_is_option(field: &syn::Field) -> bool {
@@ -190,4 +217,25 @@ fn field_builder_attr(field: &syn::Field) -> Option<String> {
         }
     }
     None
+}
+
+struct BuilderEachAttr {
+    fn_name: syn::LitStr,
+}
+
+impl Parse for BuilderEachAttr {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let meta = input.parse::<syn::Meta>()?;
+        let err = Error::new_spanned(&meta, "expected `builder(each = \"...\")");
+        if let syn::Meta::NameValue(nv) = meta {
+            if nv.path.is_ident("each") {
+                if let syn::Lit::Str(fn_name) = nv.lit {
+                    return Ok(BuilderEachAttr { fn_name });
+                }
+            }
+            Err(err)
+        } else {
+            Err(err)
+        }
+    }
 }
