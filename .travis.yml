@@ -5,5 +5,11 @@ rust:
   - beta
   - nightly
 
+install:
+  - rustup component add rustfmt
+  - rustup component add clippy
+
 script:
-  - cargo check
+  - cargo fmt --all -- --check
+  - cargo clippy --all -- -D warnings
+  - cargo test --all
