@@ -2,7 +2,7 @@ extern crate proc_macro;
 #[macro_use]
 extern crate quote;
 
-use syn::parse::{Error, Parse, ParseStream, Result};
+use syn::parse::{Error, Result};
 
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -34,8 +34,7 @@ fn impl_builder_for_struct(ast: syn::DeriveInput) -> proc_macro2::TokenStream {
     let struct_builder = struct_builder(&builder_name, &fields);
     let impl_build_fn_for_struct_builder =
         impl_build_fn_for_struct_builder(&name, &builder_name, &fields);
-    let impl_setters_for_struct_builder = impl_setters_for_struct_builder(&builder_name, &fields)
-        .unwrap_or_else(|err| err.to_compile_error());
+    let impl_setters_for_struct_builder = impl_setters_for_struct_builder(&builder_name, &fields);
 
     quote! {
         #impl_builder_fn_for_struct
@@ -92,26 +91,25 @@ fn struct_builder(builder_name: &syn::Ident, fields: &syn::Fields) -> proc_macro
 fn impl_setters_for_struct_builder(
     builder_name: &syn::Ident,
     fields: &syn::Fields,
-) -> Result<proc_macro2::TokenStream> {
+) -> proc_macro2::TokenStream {
     let builder_setters = fields.iter().map(|field| {
         let ident = &field.ident;
         let ty = &field.ty;
         if let Some(vec_inner_ty) = generic_inner_type(field, "Vec") {
-            if let Some(fn_name) = field_builder_attr(field) {
-                let fn_name = format_ident!("{}", fn_name);
-                quote! {
+            match field_builder_attr_each(field) {
+                Ok(Some(fn_name)) => quote! {
                     pub fn #fn_name(&mut self, #ident: #vec_inner_ty) -> &mut Self {
                         self.#ident.push(#ident);
                         self
                     }
-                }
-            } else {
-                quote! {
+                },
+                Ok(None) => quote! {
                     pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
                         self.#ident = #ident;
                         self
                     }
-                }
+                },
+                Err(err) => err.to_compile_error(),
             }
         } else if let Some(option_inner_ty) = generic_inner_type(field, "Option") {
             quote! {
@@ -129,11 +127,11 @@ fn impl_setters_for_struct_builder(
             }
         }
     });
-    Ok(quote! {
+    quote! {
         impl #builder_name {
             #( #builder_setters )*
         }
-    })
+    }
 }
 
 fn impl_build_fn_for_struct_builder(
@@ -197,45 +195,46 @@ fn generic_inner_type<'a>(field: &'a syn::Field, outer_ty: &str) -> Option<&'a s
     None
 }
 
-fn field_builder_attr(field: &syn::Field) -> Option<String> {
+fn field_builder_attr(field: &syn::Field) -> Option<&syn::Attribute> {
     for attr in field.attrs.iter() {
         if attr.path.is_ident("builder") {
-            if let Ok(syn::Meta::List(meta_list)) = attr.parse_meta() {
-                for meta in meta_list.nested {
-                    if let syn::NestedMeta::Meta(syn::Meta::NameValue(nv)) = meta {
-                        if nv.path.is_ident("each") {
-                            if let syn::Lit::Str(fn_name) = nv.lit {
-                                let fn_name = fn_name.value();
-                                if !fn_name.is_empty() {
-                                    return Some(fn_name);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            return Some(attr);
         }
     }
     None
 }
 
-struct BuilderEachAttr {
-    fn_name: syn::LitStr,
-}
-
-impl Parse for BuilderEachAttr {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let meta = input.parse::<syn::Meta>()?;
-        let err = Error::new_spanned(&meta, "expected `builder(each = \"...\")");
-        if let syn::Meta::NameValue(nv) = meta {
-            if nv.path.is_ident("each") {
-                if let syn::Lit::Str(fn_name) = nv.lit {
-                    return Ok(BuilderEachAttr { fn_name });
+fn field_builder_attr_each(field: &syn::Field) -> Result<Option<syn::Ident>> {
+    if let Some(builder_attr) = field_builder_attr(field) {
+        match builder_attr.parse_meta()? {
+            syn::Meta::List(meta_list) => {
+                if let Some(syn::NestedMeta::Meta(syn::Meta::NameValue(nv))) =
+                    meta_list.nested.first()
+                {
+                    if !nv.path.is_ident("each") {
+                        return Err(unrecognized_attr_error(meta_list));
+                    }
+                    match &nv.lit {
+                        syn::Lit::Str(fn_name) => {
+                            let fn_name = fn_name.value();
+                            if fn_name.is_empty() {
+                                return Err(unrecognized_attr_error(nv));
+                            } else {
+                                return Ok(Some(format_ident!("{}", fn_name)));
+                            }
+                        }
+                        _ => return Err(unrecognized_attr_error(nv)),
+                    }
+                } else {
+                    return Err(unrecognized_attr_error(meta_list));
                 }
             }
-            Err(err)
-        } else {
-            Err(err)
+            other => return Err(unrecognized_attr_error(other)),
         }
     }
+    Ok(None)
+}
+
+fn unrecognized_attr_error<M: quote::ToTokens>(meta: M) -> Error {
+    Error::new_spanned(meta, "expected `builder(each = \"...\")`")
 }
