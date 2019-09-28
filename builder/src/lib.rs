@@ -56,9 +56,9 @@ fn impl_builder_fn_for_struct(
     let builder_default_fields = fields.iter().map(|field| {
         let ident = &field.ident;
         if field_is_vec(field) {
-            quote! { #ident: vec![], }
+            quote! { #ident: std::vec![], }
         } else {
-            quote! { #ident: None, }
+            quote! { #ident: std::option::Option::None, }
         }
     });
     quote! {
@@ -79,7 +79,7 @@ fn struct_builder(builder_name: &syn::Ident, fields: &syn::Fields) -> proc_macro
         if field_is_option(field) || field_is_vec(field) {
             quote! { #ident: #ty, }
         } else {
-            quote! { #ident: Option<#ty>, }
+            quote! { #ident: std::option::Option<#ty>, }
         }
     });
     quote! {
@@ -116,14 +116,14 @@ fn impl_setters_for_struct_builder(
         } else if let Some(option_inner_ty) = generic_inner_type(field, "Option") {
             quote! {
                 pub fn #ident(&mut self, #ident: #option_inner_ty) -> &mut Self {
-                    self.#ident = Some(#ident);
+                    self.#ident = std::option::Option::Some(#ident);
                     self
                 }
             }
         } else {
             quote! {
                 pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
-                    self.#ident = Some(#ident);
+                    self.#ident = std::option::Option::Some(#ident);
                     self
                 }
             }
@@ -155,7 +155,7 @@ fn impl_build_fn_for_struct_builder(
         });
     quote! {
         impl #builder_name {
-            pub fn build(&mut self) -> Result<#name, Box<dyn std::error::Error>> {
+            pub fn build(&mut self) -> std::result::Result<#name, std::boxed::Box<dyn std::error::Error>> {
                 Ok(#name {
                     #( #build_set_fields )*
                 })
