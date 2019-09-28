@@ -2,8 +2,6 @@ extern crate proc_macro;
 #[macro_use]
 extern crate quote;
 
-use syn::parse::{Error, Result};
-
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // Parse the input tokens into a syntax tree.
@@ -204,37 +202,31 @@ fn field_builder_attr(field: &syn::Field) -> Option<&syn::Attribute> {
     None
 }
 
-fn field_builder_attr_each(field: &syn::Field) -> Result<Option<syn::Ident>> {
+fn field_builder_attr_each(field: &syn::Field) -> syn::Result<Option<syn::Ident>> {
     if let Some(builder_attr) = field_builder_attr(field) {
         match builder_attr.parse_meta()? {
-            syn::Meta::List(meta_list) => {
-                if let Some(syn::NestedMeta::Meta(syn::Meta::NameValue(nv))) =
-                    meta_list.nested.first()
-                {
+            syn::Meta::List(meta_list) => match meta_list.nested.first() {
+                Some(syn::NestedMeta::Meta(syn::Meta::NameValue(nv))) => {
                     if !nv.path.is_ident("each") {
                         return Err(unrecognized_attr_error(meta_list));
                     }
-                    match &nv.lit {
-                        syn::Lit::Str(fn_name) => {
-                            let fn_name = fn_name.value();
-                            if fn_name.is_empty() {
-                                return Err(unrecognized_attr_error(nv));
-                            } else {
-                                return Ok(Some(format_ident!("{}", fn_name)));
-                            }
+                    if let syn::Lit::Str(fn_name) = &nv.lit {
+                        let fn_name = fn_name.value();
+                        if !fn_name.is_empty() {
+                            return Ok(Some(format_ident!("{}", fn_name)));
                         }
-                        _ => return Err(unrecognized_attr_error(nv)),
+                    } else {
+                        return Err(unrecognized_attr_error(nv));
                     }
-                } else {
-                    return Err(unrecognized_attr_error(meta_list));
                 }
-            }
+                _ => return Err(unrecognized_attr_error(meta_list)),
+            },
             other => return Err(unrecognized_attr_error(other)),
         }
     }
     Ok(None)
 }
 
-fn unrecognized_attr_error<M: quote::ToTokens>(meta: M) -> Error {
-    Error::new_spanned(meta, "expected `builder(each = \"...\")`")
+fn unrecognized_attr_error<M: quote::ToTokens>(meta: M) -> syn::Error {
+    syn::Error::new_spanned(meta, "expected `builder(each = \"...\")`")
 }
