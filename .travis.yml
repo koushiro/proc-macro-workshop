@@ -10,6 +10,6 @@ install:
   - if [[ $TRAVIS_RUST_VERSION == "stable" ]]; then rustup component add clippy; fi
 
 script:
-  - if [[ $TRAVIS_RUST_VERSION == "stable" ]]; then cargo fmt --all -- --check
-  - if [[ $TRAVIS_RUST_VERSION == "stable" ]]; then cargo clippy --all -- -D warnings
+  - if [[ $TRAVIS_RUST_VERSION == "stable" ]]; then cargo fmt --all -- --check; fi
+  - if [[ $TRAVIS_RUST_VERSION == "stable" ]]; then cargo clippy --all -- -D warnings; fi
   - cargo test --all
