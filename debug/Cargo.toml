@@ -22,15 +22,15 @@ path = "tests/progress.rs"
 #[[bin]]
 #name = "03"
 #path = "tests/03-custom-format.rs"
-#[[bin]]
-#name = "04"
-#path = "tests/04-type-parameter.rs"
-#[[bin]]
-#name = "05"
-#path = "tests/05-phantom-data.rs"
-#[[bin]]
-#name = "06"
-#path = "tests/06-bound-trouble.rs"
+[[bin]]
+name = "04"
+path = "tests/04-type-parameter.rs"
+[[bin]]
+name = "05"
+path = "tests/05-phantom-data.rs"
+[[bin]]
+name = "06"
+path = "tests/06-bound-trouble.rs"
 #[[bin]]
 #name = "07"
 #path = "tests/07-associated-type.rs"
